@@ -1,45 +1,43 @@
 version: '2'
 
+# silent: true
+
+includes:
+  docs: ./docs
+
 vars:
   GIT_COMMIT:
     sh: git log -n 1 --format=%h
 
   GO_PACKAGES:
-    .
-    ./cmd/task
-    ./internal/args
-    ./internal/compiler
-    ./internal/compiler/v1
-    ./internal/compiler/v2
-    ./internal/execext
-    ./internal/logger
-    ./internal/output
-    ./internal/status
-    ./internal/taskfile
-    ./internal/taskfile/version
-    ./internal/templater
+    sh: go list ./...
 
 tasks:
-  # compiles current source code and make "task" executable available on
-  # $GOPATH/bin/task{.exe}
+  default:
+    cmds:
+      - task: test
+
   install:
     desc: Installs Task
     cmds:
       - go install -v -ldflags="-w -s -X main.version={{.GIT_COMMIT}}" ./cmd/task
+    env:
+      CGO_ENABLED: '0'
 
   dl-deps:
     desc: Downloads cli dependencies
     cmds:
       - task: go-get
-        vars: {REPO: github.com/golang/lint/golint}
-      - task: go-get
-        vars: {REPO: github.com/asticode/go-astitodo/astitodo}
-      - task: go-get
-        vars: {REPO: github.com/golang/dep/cmd/dep}
+        vars: {REPO: golang.org/x/lint/golint}
       - task: go-get
         vars: {REPO: github.com/goreleaser/goreleaser}
       - task: go-get
         vars: {REPO: github.com/goreleaser/godownloader}
+
+  vendor:
+    desc: Sync vendor/ directory according to go.mod file
+    cmds:
+      - go mod vendor
 
   update-deps:
     desc: Updates dependencies
@@ -55,14 +53,14 @@ tasks:
   lint:
     desc: Runs golint
     cmds:
-      - golint {{.GO_PACKAGES}}
+      - golint {{catLines .GO_PACKAGES}}
     silent: true
 
   test:
     desc: Runs test suite
     deps: [install]
     cmds:
-      - go test {{.GO_PACKAGES}}
+      - go test {{catLines .GO_PACKAGES}}
 
   test-release:
     desc: Tests release process without publishing
@@ -70,23 +68,23 @@ tasks:
       - goreleaser --snapshot --rm-dist
 
   generate-install-script:
-    desc: Generate install script using https://githbub.com/goreleaser/godownloader
+    desc: Generate install script using https://github.com/goreleaser/godownloader
     cmds:
       - godownloader --repo go-task/task -o install-task.sh
-
-  todo:
-    desc: Prints TODO comments present in the code
-    cmds:
-      - astitodo {{.GO_PACKAGES}}
-    silent: true
+      - cp ./install-task.sh ./docs/install.sh
 
   ci:
     cmds:
       - task: go-get
-        vars: {REPO: github.com/golang/lint/golint}
+        vars: {REPO: golang.org/x/lint/golint}
       - task: lint
       - task: test
 
   go-get:
     cmds:
       - go get -u {{.REPO}}
+
+  packages:
+    cmds:
+      - echo '{{.GO_PACKAGES}}'
+    silent: true

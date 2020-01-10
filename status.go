@@ -4,19 +4,19 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/go-task/task/internal/execext"
-	"github.com/go-task/task/internal/status"
-	"github.com/go-task/task/internal/taskfile"
+	"github.com/go-task/task/v2/internal/execext"
+	"github.com/go-task/task/v2/internal/status"
+	"github.com/go-task/task/v2/internal/taskfile"
 )
 
 // Status returns an error if any the of given tasks is not up-to-date
-func (e *Executor) Status(calls ...taskfile.Call) error {
+func (e *Executor) Status(ctx context.Context, calls ...taskfile.Call) error {
 	for _, call := range calls {
-		t, ok := e.Taskfile.Tasks[call.Task]
-		if !ok {
-			return &taskNotFoundError{taskName: call.Task}
+		t, err := e.CompiledTask(call)
+		if err != nil {
+			return err
 		}
-		isUpToDate, err := isTaskUpToDate(e.Context, t)
+		isUpToDate, err := e.isTaskUpToDate(ctx, t)
 		if err != nil {
 			return err
 		}
@@ -27,12 +27,12 @@ func (e *Executor) Status(calls ...taskfile.Call) error {
 	return nil
 }
 
-func isTaskUpToDate(ctx context.Context, t *taskfile.Task) (bool, error) {
+func (e *Executor) isTaskUpToDate(ctx context.Context, t *taskfile.Task) (bool, error) {
 	if len(t.Status) > 0 {
-		return isTaskUpToDateStatus(ctx, t)
+		return e.isTaskUpToDateStatus(ctx, t)
 	}
 
-	checker, err := getStatusChecker(t)
+	checker, err := e.getStatusChecker(t)
 	if err != nil {
 		return false, err
 	}
@@ -40,15 +40,15 @@ func isTaskUpToDate(ctx context.Context, t *taskfile.Task) (bool, error) {
 	return checker.IsUpToDate()
 }
 
-func statusOnError(t *taskfile.Task) error {
-	checker, err := getStatusChecker(t)
+func (e *Executor) statusOnError(t *taskfile.Task) error {
+	checker, err := e.getStatusChecker(t)
 	if err != nil {
 		return err
 	}
 	return checker.OnError()
 }
 
-func getStatusChecker(t *taskfile.Task) (status.Checker, error) {
+func (e *Executor) getStatusChecker(t *taskfile.Task) (status.Checker, error) {
 	switch t.Method {
 	case "", "timestamp":
 		return &status.Timestamp{
@@ -58,9 +58,11 @@ func getStatusChecker(t *taskfile.Task) (status.Checker, error) {
 		}, nil
 	case "checksum":
 		return &status.Checksum{
-			Dir:     t.Dir,
-			Task:    t.Task,
-			Sources: t.Sources,
+			Dir:       t.Dir,
+			Task:      t.Task,
+			Sources:   t.Sources,
+			Generates: t.Generates,
+			Dry:       e.Dry,
 		}, nil
 	case "none":
 		return status.None{}, nil
@@ -69,17 +71,18 @@ func getStatusChecker(t *taskfile.Task) (status.Checker, error) {
 	}
 }
 
-func isTaskUpToDateStatus(ctx context.Context, t *taskfile.Task) (bool, error) {
+func (e *Executor) isTaskUpToDateStatus(ctx context.Context, t *taskfile.Task) (bool, error) {
 	for _, s := range t.Status {
-		err := execext.RunCommand(&execext.RunCommandOptions{
-			Context: ctx,
+		err := execext.RunCommand(ctx, &execext.RunCommandOptions{
 			Command: s,
 			Dir:     t.Dir,
 			Env:     getEnviron(t),
 		})
 		if err != nil {
+			e.Logger.VerboseOutf("task: status command %s exited non-zero: %s", s, err)
 			return false, nil
 		}
+		e.Logger.VerboseOutf("task: status command %s exited zero", s)
 	}
 	return true, nil
 }

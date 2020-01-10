@@ -9,7 +9,7 @@ import (
 
 type Prefixed struct{}
 
-func (Prefixed) WrapWriter(w io.Writer, prefix string) io.WriteCloser {
+func (Prefixed) WrapWriter(w io.Writer, prefix string) io.Writer {
 	return &prefixWriter{writer: w, prefix: prefix}
 }
 
@@ -34,12 +34,12 @@ func (pw *prefixWriter) Close() error {
 
 func (pw *prefixWriter) writeOutputLines(force bool) error {
 	for {
-		line, err := pw.buff.ReadString('\n')
-		if err == nil {
+		switch line, err := pw.buff.ReadString('\n'); err {
+		case nil:
 			if err = pw.writeLine(line); err != nil {
 				return err
 			}
-		} else if err == io.EOF {
+		case io.EOF:
 			// if this line was not a complete line, re-add to the buffer
 			if !force && !strings.HasSuffix(line, "\n") {
 				_, err = pw.buff.WriteString(line)
@@ -47,7 +47,7 @@ func (pw *prefixWriter) writeOutputLines(force bool) error {
 			}
 
 			return pw.writeLine(line)
-		} else {
+		default:
 			return err
 		}
 	}

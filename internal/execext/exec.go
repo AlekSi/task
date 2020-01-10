@@ -5,15 +5,17 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
-	"mvdan.cc/sh/interp"
-	"mvdan.cc/sh/syntax"
+	"mvdan.cc/sh/v3/expand"
+	"mvdan.cc/sh/v3/interp"
+	"mvdan.cc/sh/v3/shell"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 // RunCommandOptions is the options for the RunCommand func
 type RunCommandOptions struct {
-	Context context.Context
 	Command string
 	Dir     string
 	Env     []string
@@ -28,7 +30,7 @@ var (
 )
 
 // RunCommand runs a shell command
-func RunCommand(opts *RunCommandOptions) error {
+func RunCommand(ctx context.Context, opts *RunCommandOptions) error {
 	if opts == nil {
 		return ErrNilOptions
 	}
@@ -42,25 +44,45 @@ func RunCommand(opts *RunCommandOptions) error {
 	if len(environ) == 0 {
 		environ = os.Environ()
 	}
-	env, err := interp.EnvFromList(environ)
+
+	r, err := interp.New(
+		interp.Dir(opts.Dir),
+		interp.Env(expand.ListEnviron(environ...)),
+
+		interp.OpenHandler(func(ctx context.Context, path string, flag int, perm os.FileMode) (io.ReadWriteCloser, error) {
+			if path == "/dev/null" {
+				return devNull{}, nil
+			}
+			return interp.DefaultOpenHandler()(ctx, path, flag, perm)
+		}),
+
+		interp.StdIO(opts.Stdin, opts.Stdout, opts.Stderr),
+	)
 	if err != nil {
 		return err
 	}
+	return r.Run(ctx, p)
+}
 
-	r := interp.Runner{
-		Context: opts.Context,
-		Dir:     opts.Dir,
-		Env:     env,
-
-		Exec: interp.DefaultExec,
-		Open: interp.OpenDevImpls(interp.DefaultOpen),
-
-		Stdin:  opts.Stdin,
-		Stdout: opts.Stdout,
-		Stderr: opts.Stderr,
+// IsExitError returns true the given error is an exis status error
+func IsExitError(err error) bool {
+	if _, ok := interp.IsExitStatus(err); ok {
+		return true
 	}
-	if err = r.Reset(); err != nil {
-		return err
+	return false
+}
+
+// Expand is a helper to mvdan.cc/shell.Fields that returns the first field
+// if available.
+func Expand(s string) (string, error) {
+	s = filepath.ToSlash(s)
+	s = strings.Replace(s, " ", `\ `, -1)
+	fields, err := shell.Fields(s, nil)
+	if err != nil {
+		return "", err
 	}
-	return r.Run(p)
+	if len(fields) > 0 {
+		return fields[0], nil
+	}
+	return "", nil
 }

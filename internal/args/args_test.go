@@ -4,21 +4,21 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/go-task/task/internal/args"
-	"github.com/go-task/task/internal/taskfile"
+	"github.com/go-task/task/v2/internal/args"
+	"github.com/go-task/task/v2/internal/taskfile"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestArgs(t *testing.T) {
 	tests := []struct {
-		Args     []string
-		Expected []taskfile.Call
-		Err      error
+		Args            []string
+		ExpectedCalls   []taskfile.Call
+		ExpectedGlobals taskfile.Vars
 	}{
 		{
 			Args: []string{"task-a", "task-b", "task-c"},
-			Expected: []taskfile.Call{
+			ExpectedCalls: []taskfile.Call{
 				{Task: "task-a"},
 				{Task: "task-b"},
 				{Task: "task-c"},
@@ -26,7 +26,7 @@ func TestArgs(t *testing.T) {
 		},
 		{
 			Args: []string{"task-a", "FOO=bar", "task-b", "task-c", "BAR=baz", "BAZ=foo"},
-			Expected: []taskfile.Call{
+			ExpectedCalls: []taskfile.Call{
 				{
 					Task: "task-a",
 					Vars: taskfile.Vars{
@@ -45,7 +45,7 @@ func TestArgs(t *testing.T) {
 		},
 		{
 			Args: []string{"task-a", "CONTENT=with some spaces"},
-			Expected: []taskfile.Call{
+			ExpectedCalls: []taskfile.Call{
 				{
 					Task: "task-a",
 					Vars: taskfile.Vars{
@@ -55,16 +55,44 @@ func TestArgs(t *testing.T) {
 			},
 		},
 		{
-			Args: []string{"FOO=bar", "task-a"},
-			Err:  args.ErrVariableWithoutTask,
+			Args: []string{"FOO=bar", "task-a", "task-b"},
+			ExpectedCalls: []taskfile.Call{
+				{Task: "task-a"},
+				{Task: "task-b"},
+			},
+			ExpectedGlobals: taskfile.Vars{
+				"FOO": {Static: "bar"},
+			},
+		},
+		{
+			Args: nil,
+			ExpectedCalls: []taskfile.Call{
+				{Task: "default"},
+			},
+		},
+		{
+			Args: []string{},
+			ExpectedCalls: []taskfile.Call{
+				{Task: "default"},
+			},
+		},
+		{
+			Args: []string{"FOO=bar", "BAR=baz"},
+			ExpectedCalls: []taskfile.Call{
+				{Task: "default"},
+			},
+			ExpectedGlobals: taskfile.Vars{
+				"FOO": {Static: "bar"},
+				"BAR": {Static: "baz"},
+			},
 		},
 	}
 
 	for i, test := range tests {
 		t.Run(fmt.Sprintf("TestArgs%d", i+1), func(t *testing.T) {
-			calls, err := args.Parse(test.Args...)
-			assert.Equal(t, test.Err, err)
-			assert.Equal(t, test.Expected, calls)
+			calls, globals := args.Parse(test.Args...)
+			assert.Equal(t, test.ExpectedCalls, calls)
+			assert.Equal(t, test.ExpectedGlobals, globals)
 		})
 	}
 }

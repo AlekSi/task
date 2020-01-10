@@ -2,15 +2,16 @@ package v1
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 	"sync"
 
-	"github.com/go-task/task/internal/compiler"
-	"github.com/go-task/task/internal/execext"
-	"github.com/go-task/task/internal/logger"
-	"github.com/go-task/task/internal/taskfile"
-	"github.com/go-task/task/internal/templater"
+	"github.com/go-task/task/v2/internal/compiler"
+	"github.com/go-task/task/v2/internal/execext"
+	"github.com/go-task/task/v2/internal/logger"
+	"github.com/go-task/task/v2/internal/taskfile"
+	"github.com/go-task/task/v2/internal/templater"
 )
 
 var _ compiler.Compiler = &CompilerV1{}
@@ -121,7 +122,7 @@ func (c *CompilerV1) HandleDynamicVar(v taskfile.Var) (string, error) {
 		Stdout:  &stdout,
 		Stderr:  c.Logger.Stderr,
 	}
-	if err := execext.RunCommand(opts); err != nil {
+	if err := execext.RunCommand(context.Background(), opts); err != nil {
 		return "", fmt.Errorf(`task: Command "%s" in taskvars file failed: %s`, opts.Command, err)
 	}
 

@@ -3,15 +3,9 @@ package task
 import (
 	"path/filepath"
 
-	"github.com/go-task/task/internal/taskfile"
-	"github.com/go-task/task/internal/templater"
-
-	"github.com/mitchellh/go-homedir"
-)
-
-var (
-	// TaskvarsFilePath file containing additional variables.
-	TaskvarsFilePath = "Taskvars"
+	"github.com/go-task/task/v2/internal/execext"
+	"github.com/go-task/task/v2/internal/taskfile"
+	"github.com/go-task/task/v2/internal/templater"
 )
 
 // CompiledTask returns a copy of a task, but replacing variables in almost all
@@ -29,19 +23,20 @@ func (e *Executor) CompiledTask(call taskfile.Call) (*taskfile.Task, error) {
 	r := templater.Templater{Vars: vars}
 
 	new := taskfile.Task{
-		Task:      origTask.Task,
-		Desc:      r.Replace(origTask.Desc),
-		Sources:   r.ReplaceSlice(origTask.Sources),
-		Generates: r.ReplaceSlice(origTask.Generates),
-		Status:    r.ReplaceSlice(origTask.Status),
-		Dir:       r.Replace(origTask.Dir),
-		Vars:      nil,
-		Env:       r.ReplaceVars(origTask.Env),
-		Silent:    origTask.Silent,
-		Method:    r.Replace(origTask.Method),
-		Prefix:    r.Replace(origTask.Prefix),
+		Task:        origTask.Task,
+		Desc:        r.Replace(origTask.Desc),
+		Sources:     r.ReplaceSlice(origTask.Sources),
+		Generates:   r.ReplaceSlice(origTask.Generates),
+		Status:      r.ReplaceSlice(origTask.Status),
+		Dir:         r.Replace(origTask.Dir),
+		Vars:        nil,
+		Env:         nil,
+		Silent:      origTask.Silent,
+		Method:      r.Replace(origTask.Method),
+		Prefix:      r.Replace(origTask.Prefix),
+		IgnoreError: origTask.IgnoreError,
 	}
-	new.Dir, err = homedir.Expand(new.Dir)
+	new.Dir, err = execext.Expand(new.Dir)
 	if err != nil {
 		return nil, err
 	}
@@ -50,6 +45,14 @@ func (e *Executor) CompiledTask(call taskfile.Call) (*taskfile.Task, error) {
 	}
 	if new.Prefix == "" {
 		new.Prefix = new.Task
+	}
+
+	new.Env = make(taskfile.Vars, len(e.Taskfile.Env)+len(origTask.Env))
+	for k, v := range r.ReplaceVars(e.Taskfile.Env) {
+		new.Env[k] = v
+	}
+	for k, v := range r.ReplaceVars(origTask.Env) {
+		new.Env[k] = v
 	}
 	for k, v := range new.Env {
 		static, err := e.Compiler.HandleDynamicVar(v)
@@ -63,12 +66,12 @@ func (e *Executor) CompiledTask(call taskfile.Call) (*taskfile.Task, error) {
 		new.Cmds = make([]*taskfile.Cmd, len(origTask.Cmds))
 		for i, cmd := range origTask.Cmds {
 			new.Cmds[i] = &taskfile.Cmd{
-				Task:   r.Replace(cmd.Task),
-				Silent: cmd.Silent,
-				Cmd:    r.Replace(cmd.Cmd),
-				Vars:   r.ReplaceVars(cmd.Vars),
+				Task:        r.Replace(cmd.Task),
+				Silent:      cmd.Silent,
+				Cmd:         r.Replace(cmd.Cmd),
+				Vars:        r.ReplaceVars(cmd.Vars),
+				IgnoreError: cmd.IgnoreError,
 			}
-
 		}
 	}
 	if len(origTask.Deps) > 0 {
@@ -77,6 +80,16 @@ func (e *Executor) CompiledTask(call taskfile.Call) (*taskfile.Task, error) {
 			new.Deps[i] = &taskfile.Dep{
 				Task: r.Replace(dep.Task),
 				Vars: r.ReplaceVars(dep.Vars),
+			}
+		}
+	}
+
+	if len(origTask.Preconditions) > 0 {
+		new.Preconditions = make([]*taskfile.Precondition, len(origTask.Preconditions))
+		for i, precond := range origTask.Preconditions {
+			new.Preconditions[i] = &taskfile.Precondition{
+				Sh:  r.Replace(precond.Sh),
+				Msg: r.Replace(precond.Msg),
 			}
 		}
 	}

@@ -5,10 +5,11 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
-	"github.com/go-task/task"
-	"github.com/go-task/task/internal/args"
+	"github.com/go-task/task/v2"
+	"github.com/go-task/task/v2/internal/args"
 
 	"github.com/spf13/pflag"
 )
@@ -17,7 +18,7 @@ var (
 	version = "master"
 )
 
-const usage = `Usage: task [-ilfwvsd] [--init] [--list] [--force] [--watch] [--verbose] [--silent] [--dir] [task...]
+const usage = `Usage: task [-ilfwvsd] [--init] [--list] [--force] [--watch] [--verbose] [--silent] [--dir] [--taskfile] [--dry] [--summary] [task...]
 
 Runs the specified task(s). Falls back to the "default" task if no task name
 was specified, or lists all tasks if an unknown task name was specified.
@@ -55,7 +56,12 @@ func main() {
 		watch       bool
 		verbose     bool
 		silent      bool
+		dry         bool
+		summary     bool
+		parallel    bool
 		dir         string
+		entrypoint  string
+		output      string
 	)
 
 	pflag.BoolVar(&versionFlag, "version", false, "show Task version")
@@ -66,7 +72,12 @@ func main() {
 	pflag.BoolVarP(&watch, "watch", "w", false, "enables watch of the given task")
 	pflag.BoolVarP(&verbose, "verbose", "v", false, "enables verbose mode")
 	pflag.BoolVarP(&silent, "silent", "s", false, "disables echoing")
+	pflag.BoolVarP(&parallel, "parallel", "p", false, "executes tasks provided on command line in parallel")
+	pflag.BoolVar(&dry, "dry", false, "compiles and prints tasks in the order that they would be run, without executing them")
+	pflag.BoolVar(&summary, "summary", false, "show summary about a task")
 	pflag.StringVarP(&dir, "dir", "d", "", "sets directory of execution")
+	pflag.StringVarP(&entrypoint, "taskfile", "t", "", `choose which Taskfile to run. Defaults to "Taskfile.yml"`)
+	pflag.StringVarP(&output, "output", "o", "", "sets output style: [interleaved|group|prefixed]")
 	pflag.Parse()
 
 	if versionFlag {
@@ -85,18 +96,33 @@ func main() {
 		return
 	}
 
-	e := task.Executor{
-		Force:   force,
-		Watch:   watch,
-		Verbose: verbose,
-		Silent:  silent,
-		Dir:     dir,
+	if dir != "" && entrypoint != "" {
+		log.Fatal("task: You can't set both --dir and --taskfile")
+		return
+	}
+	if entrypoint != "" {
+		dir = filepath.Dir(entrypoint)
+		entrypoint = filepath.Base(entrypoint)
+	} else {
+		entrypoint = "Taskfile.yml"
+	}
 
-		Context: getSignalContext(),
+	e := task.Executor{
+		Force:      force,
+		Watch:      watch,
+		Verbose:    verbose,
+		Silent:     silent,
+		Dir:        dir,
+		Dry:        dry,
+		Entrypoint: entrypoint,
+		Summary:    summary,
+		Parallel:   parallel,
 
 		Stdin:  os.Stdin,
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
+
+		OutputStyle: output,
 	}
 	if err := e.Setup(); err != nil {
 		log.Fatal(err)
@@ -107,25 +133,24 @@ func main() {
 		return
 	}
 
-	arguments := pflag.Args()
-	if len(arguments) == 0 {
-		log.Println("task: No argument given, trying default task")
-		arguments = []string{"default"}
+	calls, globals := args.Parse(pflag.Args()...)
+	for name, value := range globals {
+		e.Taskfile.Vars[name] = value
 	}
 
-	calls, err := args.Parse(arguments...)
-	if err != nil {
-		log.Fatal(err)
+	ctx := context.Background()
+	if !watch {
+		ctx = getSignalContext()
 	}
 
 	if status {
-		if err = e.Status(calls...); err != nil {
+		if err := e.Status(ctx, calls...); err != nil {
 			log.Fatal(err)
 		}
 		return
 	}
 
-	if err := e.Run(calls...); err != nil {
+	if err := e.Run(ctx, calls...); err != nil {
 		log.Fatal(err)
 	}
 }
